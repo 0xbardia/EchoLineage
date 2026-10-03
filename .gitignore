@@ -1,0 +1,34 @@
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+
+# Build output
+dist/
+build/
+
+# Test and deployment artifacts
+artifacts/
+
+# Editor and OS noise
+.DS_Store
+*.log
+
+# App-builder workspace template leftovers (not part of EchoLineage)
+AGENTS.md
+package.json
+package-lock.json
+tsconfig.json
+eslint.config.mjs
+vercel.json
