@@ -85,8 +85,27 @@ if (!KEY_FILE) {
   process.exit(2);
 }
 
-const { privateKey } = JSON.parse(fs.readFileSync(KEY_FILE, "utf8"));
-const account = createAccount(privateKey);
+/** Read the deployer key: raw hex, or JSON containing privateKey. */
+function readPrivateKey(file) {
+  const raw = fs.readFileSync(file, "utf8").trim();
+  let candidate = raw;
+  if (raw.startsWith("{")) {
+    const parsed = JSON.parse(raw);
+    candidate = parsed.privateKey ?? parsed.key ?? "";
+    if (!candidate) throw new Error(`${file} has JSON but no privateKey field`);
+  }
+  if (!/^(0x)?[0-9a-fA-F]{64}$/.test(candidate)) {
+    if (raw.startsWith("{") && /cipher|scrypt|kdf/i.test(raw)) {
+      throw new Error(
+        `${file} is an ENCRYPTED keystore; an unlocked private key is required`
+      );
+    }
+    throw new Error(`${file} does not contain a 32-byte hex private key`);
+  }
+  return candidate.startsWith("0x") ? candidate : "0x" + candidate;
+}
+
+const account = createAccount(readPrivateKey(KEY_FILE));
 const glClient = createClient({ chain: chains.studionet, endpoint: RPC_URL, account });
 
 log(`network  : studionet (chain ${chains.studionet.id})`);

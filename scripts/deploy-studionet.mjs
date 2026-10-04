@@ -66,6 +66,32 @@ async function rpc(method, params = []) {
   return json.result;
 }
 
+/**
+ * Read a deployer key from KEY_FILE.
+ *
+ * Accepts either a raw hex private key or a JSON object containing one, so a
+ * plain 600-mode key file works without being wrapped first.
+ */
+function readPrivateKey(file) {
+  const raw = fs.readFileSync(file, "utf8").trim();
+  let candidate = raw;
+  if (raw.startsWith("{")) {
+    const parsed = JSON.parse(raw);
+    candidate = parsed.privateKey ?? parsed.key ?? "";
+    if (!candidate) throw new Error(`${file} has JSON but no privateKey field`);
+  }
+  if (!/^(0x)?[0-9a-fA-F]{64}$/.test(candidate)) {
+    // Encrypted Web3 keystores are not usable without a password; say so plainly.
+    if (raw.startsWith("{") && /cipher|scrypt|kdf/i.test(raw)) {
+      throw new Error(
+        `${file} is an ENCRYPTED keystore; an unlocked private key is required`
+      );
+    }
+    throw new Error(`${file} does not contain a 32-byte hex private key`);
+  }
+  return candidate.startsWith("0x") ? candidate : "0x" + candidate;
+}
+
 function makeClients(withSigner) {
   if (withSigner && !KEY_FILE) {
     console.error(
@@ -75,8 +101,7 @@ function makeClients(withSigner) {
   }
   let account = null;
   if (withSigner) {
-    const { privateKey } = JSON.parse(fs.readFileSync(KEY_FILE, "utf8"));
-    account = createAccount(privateKey);
+    account = createAccount(readPrivateKey(KEY_FILE));
   }
   const glClient = createClient({
     chain: CHAIN,
