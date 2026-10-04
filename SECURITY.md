@@ -14,7 +14,7 @@ note asking for a private contact channel, with no technical detail.
 
 Include, if available:
 
-- the affected version or commit (V1 is tagged `v1.0.0`)
+- the affected version or commit (V1 is tagged `v1.0.0`, V1.0.1 is `v1.0.1`)
 - the certified contract SHA-256 you verified
 - reproduction steps or a failing test
 - the expected and observed behaviour
@@ -26,11 +26,13 @@ most security-relevant surfaces are:
 
 - URL input validation (`_normalize_url`, `_validate_inputs`)
 - prompt-injection resistance in retrieved page text (`_fence`)
-- validator agreement on decision-bearing fields (`_project`, `_same_consensus`)
+- evidence-identity binding (`_host_of`, `_project`, `_same_consensus`)
+- persistence of source identity (`_persist`)
 - failure handling and error classes
 
 ## Note on the deployed contract
 
-V1 is deployed and immutable on GenLayer Studionet. A report against the
-deployed instance cannot be patched in place; confirmed issues are addressed in
-a later version.
+V1.0.0 (`0x0038aBb76A08e8E7a830dD385E82650827EaeF33`) was reviewed, not
+accepted, and is superseded by V1.0.1. Deployed contracts are immutable; a
+report against a deployed instance cannot be patched in place. Confirmed issues
+are addressed in a later version.

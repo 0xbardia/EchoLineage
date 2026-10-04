@@ -48,15 +48,20 @@ The leader, inside the non-deterministic block, fetches each submitted URL, asks
 
 The validator does not accept the leader because the JSON is well formed. It fetches the same URLs, runs the same extraction, canonicalizes enums and indexes, rebuilds the dependency graph, and compares decision-bearing fields:
 
+- the normalized URL and derived domain of each source index
 - availability, claim relevance, and role
 - pairwise relation and, where the relation is a dependency, its subtype
 - canonical root groups
 - usable source count, independent root count, uncertain-relation count
 - classification and basis-point metrics
 
+URL and domain are not taken on trust from either payload. Each source index is bound to the exact normalized caller input URL, and to the domain derived deterministically from that URL. A leader that keeps every lineage enum identical while pointing a source at different evidence fails validation.
+
 Titles, declared origins, and explanations may differ between validators. Those strings are not compared.
 
 Natural-language page text is fenced as untrusted evidence. Instructions embedded in a page cannot change the task.
+
+Persistence follows the same rule: stored `url` and `domain` are taken from the validated caller inputs, never from leader output. The leader classifies evidence; it does not choose which evidence identity becomes stored.
 
 Accepted dependency edges are `SHARED_ROOT`, `LEFT_DERIVES_RIGHT`, `RIGHT_DERIVES_LEFT`, and `COMMON_UPSTREAM`. `INDEPENDENT` and `UNCERTAIN` do not create edges. Root groups are the connected components, sorted by source index. If any usable pair is `UNCERTAIN`, or fewer than two sources are usable, the classification is `INCONCLUSIVE`. Uncertainty is never recorded as independence.
 
@@ -118,16 +123,32 @@ Cases are immutable. A later analysis of the same claim allocates the next case 
 
 Network: GenLayer Studionet  
 Chain ID: 61999  
-Contract: `0x0038aBb76A08e8E7a830dD385E82650827EaeF33`  
-Explorer: <https://explorer-studio.genlayer.com/address/0x0038aBb76A08e8E7a830dD385E82650827EaeF33>  
-Deployment transaction: `0xbb21aa7266ad2fc74c5a4ecc6dffd8a9d581683863288049a3234cfe081d5316`  
-Version: `1.0.0`
+Version: `1.0.1` (current)
+
+**V1.0.1 binds each persisted source identity to the normalized caller input and includes URL/domain identity in validator consensus checks.**
+
+Current contract address: `PENDING_DEPLOY_ADDRESS`  
+Explorer: <https://explorer-studio.genlayer.com/address/PENDING_DEPLOY_ADDRESS>  
+Deployment transaction: `PENDING_DEPLOY_TX`
 
 Certified source SHA-256 (`contracts/EchoLineage.py`):
 
 ```text
-b1d3dc2f1bb1a7c2f7622aa26f1fffddb3fa091c656e15880731a11ebea952d8
+PENDING_SOURCE_SHA
 ```
+
+### Historical release
+
+V1.0.0 was reviewed and not accepted; it is superseded by V1.0.1. Its address is
+retained for history only and must not be treated as the current contract.
+
+Network: GenLayer Studionet  
+Chain ID: 61999  
+Contract: `0x0038aBb76A08e8E7a830dD385E82650827EaeF33`  
+Explorer: <https://explorer-studio.genlayer.com/address/0x0038aBb76A08e8E7a830dD385E82650827EaeF33>  
+Deployment transaction: `0xbb21aa7266ad2fc74c5a4ecc6dffd8a9d581683863288049a3234cfe081d5316`  
+Version: `1.0.0`  
+Source SHA-256: `b1d3dc2f1bb1a7c2f7622aa26f1fffddb3fa091c656e15880731a11ebea952d8`
 
 ## Verified lifecycle
 
@@ -147,11 +168,16 @@ genlayer-py 0.16.3
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 GENVM_VERSION=v0.3.0-rc7 .venv/bin/genvm-lint check contracts/EchoLineage.py
+GENVM_VERSION=v0.3.0-rc7 .venv/bin/python -m pytest tests/ -q
 ```
 
 The lint command runs the static checks and the SDK-reflection validation pass, reporting the contract name and its method count.
 
 `GENVM_VERSION` pins the GenVM runner bundle. Without it the linter resolves a runner that does not contain the hash pinned in the contract header, and validation fails on SDK load rather than on the contract.
+
+The test suite runs the real contract in GenLayer Direct Mode. It covers input validation, the four classifications, graph construction, relation storage, deterministic metrics, prompt-injection fencing, validator agreement and dissent, error classification, pickling, and the evidence-identity regression suite.
+
+`tests/fixtures/EchoLineage_v1_0_0.py` pins the exact V1.0.0 source that was reviewed. `tests/test_v100_repro.py` runs the identity exploit against both versions and asserts it succeeds on V1.0.0 and fails on V1.0.1, so the rejection stays reproducible and its fix stays verifiable.
 
 Local Studio integration and `gltest` require Docker and a running validator network; they were not part of this publication. Studionet is the deployment target.
 
