@@ -5,11 +5,6 @@
 EchoLineage does not decide whether a claim is true. It records how many
 independent evidentiary origins sit behind a caller-supplied set of HTTPS
 sources for that claim.
-
-Evidence identity (url, domain) is bound to the normalized caller inputs. The
-validator rejects any leader result whose per-index url/domain does not equal
-the validated input, and persistence derives stored url/domain from those same
-inputs rather than from leader output.
 """
 
 import json
@@ -19,7 +14,7 @@ from urllib.parse import parse_qsl, urlsplit, urlunsplit, urlencode
 
 from genlayer import *
 
-VERSION = "1.0.1"
+VERSION = "1.0.0"
 MAX_CLAIM = 500
 MIN_URLS = 2
 MAX_URLS = 8
@@ -150,11 +145,6 @@ def _is_private_host(host: str) -> bool:
     if a == 100 and 64 <= b <= 127:
         return True
     return False
-
-
-def _host_of(url: str) -> str:
-    # Deterministic domain derivation. Never trust a model-supplied domain.
-    return urlsplit(url).hostname or ""
 
 
 def _normalize_url(raw) -> str:
@@ -362,7 +352,7 @@ def _blank_source(index: int, url: str, state: str) -> dict:
     return {
         "index": index,
         "url": url,
-        "domain": _host_of(url),
+        "domain": urlsplit(url).hostname or "",
         "title": "",
         "availability": state,
         "claim_relevance": "UNKNOWN",
@@ -455,7 +445,7 @@ def _assemble(urls: list, fetched: list, model) -> dict:
             {
                 "index": index,
                 "url": url,
-                "domain": _host_of(url),
+                "domain": urlsplit(url).hostname or "",
                 "title": _clip(row.get("title", ""), MAX_TITLE),
                 "availability": "AVAILABLE",
                 "claim_relevance": _enum(row.get("claim_relevance"), RELEVANCE),
@@ -567,54 +557,29 @@ def _norm_token(value, allowed: tuple):
     return token
 
 
-def _project(result, expected_urls: list):
-    # Comparison ignores prose. Identity, enums, indexes, and metrics remain.
-    # Evidence identity is bound to the validated call inputs, not to the other
-    # payload: a leader cannot re-associate lineage data with different evidence.
-    if not isinstance(result, dict) or not isinstance(expected_urls, list):
+def _project(result):
+    # Comparison ignores prose. Enums, indexes, and derived metrics remain.
+    if not isinstance(result, dict):
         return None
     try:
         sources = []
-        seen = []
         for source in result["sources"]:
-            index = int(source["index"])
-            if index < 0 or index >= len(expected_urls) or index in seen:
-                return None
-            seen.append(index)
             availability = _norm_token(source["availability"], AVAILABILITY)
             relevance = _norm_token(source["claim_relevance"], RELEVANCE)
             role = _norm_token(source["role"], ROLES)
             if availability is None or relevance is None or role is None:
                 return None
-            expected_url = expected_urls[index]
-            expected_domain = _host_of(expected_url)
-            if source["url"] != expected_url:
-                return None
-            if source["domain"] != expected_domain:
-                return None
             sources.append(
                 {
-                    "index": index,
-                    "url": expected_url,
-                    "domain": expected_domain,
+                    "index": int(source["index"]),
                     "availability": availability,
                     "claim_relevance": relevance,
                     "role": role,
                 }
             )
-        if len(seen) != len(expected_urls):
-            return None
         sources.sort(key=lambda item: item["index"])
         relations = []
         for relation in result["relations"]:
-            left = int(relation["a"])
-            right = int(relation["b"])
-            if left < 0 or right < 0:
-                return None
-            if left >= len(expected_urls) or right >= len(expected_urls):
-                return None
-            if left == right:
-                return None
             kind = _norm_token(relation["relation"], RELATIONS)
             if kind is None:
                 return None
@@ -626,8 +591,8 @@ def _project(result, expected_urls: list):
                 subtype = "NONE"
             relations.append(
                 {
-                    "a": left,
-                    "b": right,
+                    "a": int(relation["a"]),
+                    "b": int(relation["b"]),
                     "relation": kind,
                     "subtype": subtype,
                 }
@@ -635,14 +600,8 @@ def _project(result, expected_urls: list):
         relations.sort(key=lambda item: (item["a"], item["b"]))
         groups = []
         for group in result["groups"]:
-            members = sorted(int(index) for index in group)
-            for member in members:
-                if member < 0 or member >= len(expected_urls):
-                    return None
-            groups.append(members)
+            groups.append(sorted(int(index) for index in group))
         groups.sort(key=lambda group: (group[0], group) if group else (0, group))
-        if int(result["source_count"]) != len(expected_urls):
-            return None
         classification = _norm_token(result["classification"], CLASSIFICATIONS)
         if classification is None:
             return None
@@ -650,7 +609,7 @@ def _project(result, expected_urls: list):
             "sources": sources,
             "relations": relations,
             "groups": groups,
-            "source_count": len(expected_urls),
+            "source_count": int(result["source_count"]),
             "usable_source_count": int(result["usable_source_count"]),
             "independent_root_count": int(result["independent_root_count"]),
             "uncertain_relation_count": int(result["uncertain_relation_count"]),
@@ -662,9 +621,9 @@ def _project(result, expected_urls: list):
         return None
 
 
-def _same_consensus(leader, own, expected_urls: list) -> bool:
-    left = _project(leader, expected_urls)
-    right = _project(own, expected_urls)
+def _same_consensus(leader, own) -> bool:
+    left = _project(leader)
+    right = _project(own)
     return left is not None and left == right
 
 
@@ -852,12 +811,12 @@ class EchoLineage(gl.Contract):
                 return False
             except Exception:
                 return False
-            return _same_consensus(leaders_res.calldata, own, urls)
+            return _same_consensus(leaders_res.calldata, own)
 
         agreed = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
-        if not _same_consensus(agreed, agreed, urls):
+        if not _same_consensus(agreed, agreed):
             _fail("LLM_OR_RUNTIME", "leader result is not consensus-shaped")
-        self._persist(claim, urls, agreed)
+        self._persist(claim, agreed)
 
     def _case(self, case_id: int) -> CaseRecord:
         if isinstance(case_id, bool) or not isinstance(case_id, int):
@@ -878,7 +837,7 @@ class EchoLineage(gl.Contract):
                 return group_index
         return NOT_GROUPED
 
-    def _persist(self, claim: str, urls: list, result: dict) -> None:
+    def _persist(self, claim: str, result: dict) -> None:
         case_id = len(self.cases)
         groups = result["groups"]
         self.cases.append(
@@ -896,24 +855,18 @@ class EchoLineage(gl.Contract):
             )
         )
         for source in result["sources"]:
-            index = source["index"]
-            # Evidence identity is derived from the validated caller input, never
-            # from leader output. The leader may classify evidence; it must never
-            # decide which evidence identity becomes stored.
-            canonical_url = urls[index]
-            canonical_domain = _host_of(canonical_url)
-            self.sources[self._source_key(case_id, index)] = SourceRecord(
+            self.sources[self._source_key(case_id, source["index"])] = SourceRecord(
                 case_id=u256(case_id),
-                source_index=u256(index),
-                url=canonical_url,
-                domain=canonical_domain,
+                source_index=u256(source["index"]),
+                url=source["url"],
+                domain=source["domain"],
                 title=source["title"],
                 availability=source["availability"],
                 claim_relevance=source["claim_relevance"],
                 role=source["role"],
                 declared_origin=source["declared_origin"],
                 lineage_basis=source["lineage_basis"],
-                root_group=u256(self._group_of(groups, index)),
+                root_group=u256(self._group_of(groups, source["index"])),
             )
         for relation in result["relations"]:
             key = self._relation_key(case_id, relation["a"], relation["b"])

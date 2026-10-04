@@ -32,3 +32,6 @@ package-lock.json
 tsconfig.json
 eslint.config.mjs
 vercel.json
+
+# Certification scratch
+screenshots/
