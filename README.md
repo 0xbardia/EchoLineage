@@ -175,9 +175,16 @@ The lint command runs the static checks and the SDK-reflection validation pass, 
 
 `GENVM_VERSION` pins the GenVM runner bundle. Without it the linter resolves a runner that does not contain the hash pinned in the contract header, and validation fails on SDK load rather than on the contract.
 
-The test suite runs the real contract in GenLayer Direct Mode. It covers input validation, the four classifications, graph construction, relation storage, deterministic metrics, prompt-injection fencing, validator agreement and dissent, error classification, pickling, and the evidence-identity regression suite.
+The test suite runs the real contract in GenLayer Direct Mode: 69 tests across four files.
 
-`tests/fixtures/EchoLineage_v1_0_0.py` pins the exact V1.0.0 source that was reviewed. `tests/test_v100_repro.py` runs the identity exploit against both versions and asserts it succeeds on V1.0.0 and fails on V1.0.1, so the rejection stays reproducible and its fix stays verifiable.
+| File | Tests | Covers |
+| --- | --- | --- |
+| `test_lineage_and_storage.py` | 35 | input validation, HTTPS enforcement, duplicates, private hosts, the four classifications, graph construction, relation storage, root groups, deterministic metrics, prompt-injection fencing, validator agreement and dissent, error classification, read methods, pickling, and the storage invariant |
+| `test_consensus_identity.py` | 18 | validator identity binding (URL, domain, swap, duplicate, missing, out-of-range), prose-only acceptance, persistence identity invariant, relation/root/malformed rejection |
+| `test_v100_repro.py` | 9 | the differential proof against the pinned V1.0.0 source |
+| `test_security_invariant.py` | 7 | each certification security question as an assertion, plus a 16-mutation identity sweep |
+
+`tests/fixtures/EchoLineage_v1_0_0.py` pins the exact V1.0.0 source that was reviewed. `tests/test_v100_repro.py` runs the identity exploit against both versions and asserts it succeeds on V1.0.0 and fails on V1.0.1, so the rejection stays reproducible and its fix stays verifiable. Reverting the fix fails 12 tests.
 
 Local Studio integration and `gltest` require Docker and a running validator network; they were not part of this publication. Studionet is the deployment target.
 
