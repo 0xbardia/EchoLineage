@@ -17,6 +17,36 @@ const RPC_URL = process.env.GENLAYER_RPC_URL || chains.studionet.rpcUrls.default
 const POLL_SECONDS = Number(process.env.EL_POLL_SECONDS || 6);
 const POLL_TIMEOUT_MS = Number(process.env.EL_POLL_TIMEOUT_MS || 20 * 60 * 1000);
 
+const EXPLORER_API =
+  process.env.GENLAYER_EXPLORER_API || "https://explorer-studio.genlayer.com/api";
+
+/**
+ * Read a transaction's status.
+ *
+ * Prefers the node's gen_ method, then falls back to the Studio explorer: the
+ * node's gen_* surface is quota-limited (5000/day, shared) while the explorer
+ * is not, and a deployment/analyze must still be confirmable when the quota is
+ * exhausted.
+ */
+async function readStatus(txHash) {
+  try {
+    const tx = await rpc("gen_getTransactionByHash", [txHash]);
+    if (tx) return tx;
+  } catch {
+    /* fall through to the explorer */
+  }
+  try {
+    const res = await fetch(`${EXPLORER_API}/transactions/${txHash}`, {
+      headers: { "User-Agent": "echolineage-analyze/1.0" },
+    });
+    if (!res.ok) return null;
+    const body = await res.json();
+    return body?.transaction ?? body ?? null;
+  } catch {
+    return null;
+  }
+}
+
 const TERMINAL = new Set([
   "FINALIZED",
   "REJECTED",
@@ -58,7 +88,7 @@ async function waitFinal(txHash) {
   while (Date.now() < deadline) {
     let tx = null;
     try {
-      tx = await rpc("gen_getTransactionByHash", [txHash]);
+      tx = await readStatus(txHash);
     } catch (e) {
       log(`  poll error: ${e.message}`);
     }

@@ -39,6 +39,33 @@ const EXPLORER_API =
 const POLL_SECONDS = Number(process.env.EL_POLL_SECONDS || 6);
 const POLL_TIMEOUT_MS = Number(process.env.EL_POLL_TIMEOUT_MS || 15 * 60 * 1000);
 
+/**
+ * Read a transaction's status.
+ *
+ * Falls back to the Studio explorer because the node's gen_* surface is
+ * quota-limited (5000/day, shared). Without the fallback a submitted
+ * deployment cannot be confirmed while the quota is exhausted, even though the
+ * transaction itself landed and finalized.
+ */
+async function readTx(txHash) {
+  try {
+    const tx = await rpc("gen_getTransactionByHash", [txHash]);
+    if (tx) return tx;
+  } catch {
+    /* fall through to the explorer */
+  }
+  try {
+    const res = await fetch(`${EXPLORER_API}/transactions/${txHash}`, {
+      headers: { "User-Agent": "echolineage-deploy/1.0" },
+    });
+    if (!res.ok) return null;
+    const body = await res.json();
+    return body?.transaction ?? body ?? null;
+  } catch {
+    return null;
+  }
+}
+
 const TERMINAL = new Set([
   "FINALIZED",
   "REJECTED",
@@ -111,16 +138,6 @@ function makeClients(withSigner) {
   return { glClient, address: account?.address ?? null };
 }
 
-async function txStatus(txHash) {
-  try {
-    const tx = await rpc("gen_getTransactionByHash", [txHash]);
-    const state = tx?.state ?? tx?.status ?? tx?.finality;
-    return typeof state === "object" && state !== null ? state : tx;
-  } catch {
-    return null;
-  }
-}
-
 function statusName(tx) {
   if (!tx) return null;
   const s = tx.state ?? tx.status;
@@ -135,7 +152,7 @@ async function waitFinal(txHash) {
   const deadline = Date.now() + POLL_TIMEOUT_MS;
   let last = null;
   while (Date.now() < deadline) {
-    const tx = await txStatus(txHash);
+    const tx = await readTx(txHash).catch(() => null);
     const name = statusName(tx);
     if (name && name !== last) {
       log(`  status: ${name}`);
