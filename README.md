@@ -127,15 +127,19 @@ Version: `1.0.1` (current)
 
 **V1.0.1 binds each persisted source identity to the normalized caller input and includes URL/domain identity in validator consensus checks.**
 
-Current contract address: `PENDING_DEPLOY_ADDRESS`  
-Explorer: <https://explorer-studio.genlayer.com/address/PENDING_DEPLOY_ADDRESS>  
-Deployment transaction: `PENDING_DEPLOY_TX`
+Contract: `0xE604f47B0CA6940C3824B8F60dBE04657D12A870`  
+Explorer: <https://explorer-studio.genlayer.com/address/0xE604f47B0CA6940C3824B8F60dBE04657D12A870>  
+Deployment transaction: `0xe1a9f94461f318589b8481ffddb81c449c9c07dae465fa24a0eb8d4a59061a4c`  
+Deployment status: FINALIZED
 
 Certified source SHA-256 (`contracts/EchoLineage.py`):
 
 ```text
-PENDING_SOURCE_SHA
+88bf6594ba33960660c6f0beed13fed3f001a98e8f0889c35d42351dd7b9ae9c
 ```
+
+The contract code recorded in the deployment transaction decodes to exactly
+these bytes; the on-chain `VERSION` reads `1.0.1`.
 
 ### Historical release
 
