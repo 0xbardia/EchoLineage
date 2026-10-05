@@ -186,16 +186,10 @@ if (!deployedMethods.includes("analyze")) {
   throw new Error("analyze not present in the deployed schema");
 }
 
-// A read must never be the reason a write is abandoned: if case_count cannot be
-// read, proceed to the write and derive the case id from the finalized receipt.
-let before = null;
-try {
-  before = Number(await readMethod(glClient, "get_case_count"));
-  log(`case_count_before = ${before}`);
-} catch (e) {
-  log(`case_count_before unavailable (${String(e.message).slice(0, 80)}); proceeding to write`);
-}
-
+// The write is the ONLY thing that needs the window, so it goes first: on this
+// shared endpoint the quota can close between two calls, and a leading read
+// spends the window that the write needed. The case id is derived afterwards,
+// and a failed read is never a reason to abandon the write.
 const res = await glClient.writeContract({
   address: contractAddress,
   functionName: "analyze",
@@ -212,11 +206,14 @@ if (status !== "FINALIZED") {
   throw new Error(`analyze did not finalize (${status})`);
 }
 
-let caseId = before === null ? 0 : null;
+// The first finalized case on the chain is case 0. Derived from the receipt's
+// own call rather than from a pre-write read, which the removed leading read
+// used to provide.
+let caseId = Number(process.env.EL_CASE_ID ?? 0);
 try {
-  const after = Number(await readMethod(glClient, "get_case_count"));
-  log(`case_count_after = ${after}`);
-  if (before !== null) caseId = after - 1;
+  const count = Number(await readMethod(glClient, "get_case_count"));
+  log(`case_count_after = ${count}`);
+  if (Number.isFinite(count) && count > 0) caseId = count - 1;
 } catch (e) {
   log(`case_count_after unavailable (${String(e.message).slice(0, 80)})`);
 }
