@@ -83,18 +83,34 @@ function statusName(tx) {
 }
 
 /**
- * Fetch the deployed schema and build a bound contract.
+ * Run a deployed read method.
+ *
+ * The SDK exposes no createContract; reads go through readContract with the
+ * abi from the schema. jsonSafeReturn stays at its default (true): with
+ * jsonSafeReturn:false a u256 column comes back as BigInt and the SDK's own
+ * encoder then throws "Do not know how to serialize a BigInt". The default
+ * returns counts as strings, which toNum normalizes.
+ */
+async function readMethod(contract, abi, functionName, args = []) {
+  const v = await contract.readContract({
+    address: contractAddress,
+    abi,
+    functionName,
+    args,
+  });
+  return typeof v === "bigint" ? Number(v) : v;
+}
+
+/**
+ * Fetch the deployed schema and return it.
  *
  * Accepts a pre-fetched schema so a caller that already paid for the fetch
  * (the quota watcher) does not pay twice: on the shared Studio endpoint the
  * quota window can close between the two calls, which turns a write that could
  * have landed into a rate-limit error.
  */
-async function bindContract(address, preloaded) {
-  const schema = preloaded ?? (await glClient.getContractSchema(address));
-  const contract = glClient.createContract({ address, abi: schema.abi });
-  if (!contract.methods.analyze) throw new Error("analyze not present in deployed schema");
-  return { contract, schema };
+async function loadSchema(address, preloaded) {
+  return preloaded ?? (await glClient.getContractSchema(address));
 }
 
 async function waitFinal(txHash) {
@@ -167,19 +183,26 @@ if (process.env.EL_SCHEMA_FILE) {
   preloaded = JSON.parse(fs.readFileSync(process.env.EL_SCHEMA_FILE, "utf8"));
   log(`schema   : preloaded from ${process.env.EL_SCHEMA_FILE}`);
 }
-const { contract } = await bindContract(contractAddress, preloaded);
+const abi = (await loadSchema(contractAddress, preloaded)).abi;
+if (!abi) throw new Error("schema contained no abi");
 
 // A read must never be the reason a write is abandoned: if case_count cannot be
 // read, proceed to the write and derive the case id from the finalized receipt.
 let before = null;
 try {
-  before = Number(await contract.methods.get_case_count());
+  before = Number(await readMethod(glClient, abi, "get_case_count"));
   log(`case_count_before = ${before}`);
 } catch (e) {
   log(`case_count_before unavailable (${e.message.slice(0, 80)}); proceeding to write`);
 }
 
-const res = await contract.methods.analyze(claim, urlsJson);
+const res = await glClient.writeContract({
+  address: contractAddress,
+  abi,
+  functionName: "analyze",
+  args: [claim, urlsJson],
+  value: 0n,
+});
 const txHash = typeof res === "string" ? res : (res.transactionHash ?? res.hash);
 log(`WRITE_TX=${txHash}`);
 
@@ -192,7 +215,7 @@ if (status !== "FINALIZED") {
 
 let caseId = before === null ? 0 : null;
 try {
-  const after = Number(await contract.methods.get_case_count());
+  const after = Number(await readMethod(glClient, abi, "get_case_count"));
   log(`case_count_after = ${after}`);
   if (before !== null) caseId = after - 1;
 } catch (e) {
@@ -200,16 +223,16 @@ try {
 }
 log(`CASE_ID=${caseId}`);
 
-for (const [name, args] of [
-  ["get_case", [caseId]],
-  ["get_sources", [caseId]],
-  ["get_diversity_bps", [caseId]],
-  ["get_redundancy_bps", [caseId]],
-  ["get_classification", [caseId]],
-  ["get_root_count", [caseId]],
+for (const name of [
+  "get_case",
+  "get_sources",
+  "get_diversity_bps",
+  "get_redundancy_bps",
+  "get_classification",
+  "get_root_count",
 ]) {
   try {
-    log(`${name} = ${JSON.stringify(await contract.methods[name](...args))}`);
+    log(`${name} = ${JSON.stringify(await readMethod(glClient, abi, name, [caseId]))}`);
   } catch (e) {
     log(`${name} = ERROR ${e.message.slice(0, 120)}`);
   }

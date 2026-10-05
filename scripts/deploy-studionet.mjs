@@ -212,12 +212,17 @@ async function cmdDeploy() {
   return contractAddress;
 }
 
-async function readRaw(glClient, address, method, args = []) {
-  const schema = await glClient.getContractSchema(address);
-  const contract = glClient.createContract({ address, abi: schema.abi });
-  const fn = contract.methods[method];
-  if (!fn) throw new Error(`method ${method} not present in schema`);
-  return await fn(...args);
+async function readRaw(glClient, abi, address, method, args = []) {
+  // jsonSafeReturn stays at its default (true): with it false, a u256 column
+  // comes back as BigInt and the SDK's own encoder throws
+  // "Do not know how to serialize a BigInt". The default returns counts as
+  // strings, which toNum normalizes.
+  return glClient.readContract({
+    address,
+    abi,
+    functionName: method,
+    args,
+  });
 }
 
 async function cmdCertify(target) {
@@ -226,40 +231,55 @@ async function cmdCertify(target) {
   const { glClient } = makeClients(false);
   log(`certifying reads on ${address} @ ${NETWORK_KEY}\n`);
 
-  const version = await readRaw(glClient, address, "get_version");
-  log(`get_version        = ${JSON.stringify(version)}`);
+  let preloaded = null;
+  if (process.env.EL_SCHEMA_FILE) {
+    preloaded = JSON.parse(fs.readFileSync(process.env.EL_SCHEMA_FILE, "utf8"));
+    log(`schema: preloaded from ${process.env.EL_SCHEMA_FILE}`);
+  }
+  const schema = preloaded ?? (await glClient.getContractSchema(address));
+  const abi = schema.abi;
+  const methodCount = Object.keys(schema?.methods ?? {}).length;
+  log(`schema methods: ${methodCount}`);
+  if (methodCount !== 13) throw new Error(`expected 13 methods, schema reports ${methodCount}`);
+
+  const record = async (method, ...args) => {
+    try {
+      const v = await readRaw(glClient, abi, address, method, args);
+      log(`${method.padEnd(22)}= ${JSON.stringify(v)}`);
+      return v;
+    } catch (e) {
+      log(`${method.padEnd(22)}= ERROR ${String(e.message).slice(0, 160)}`);
+      return null;
+    }
+  };
+
+  const version = await record("get_version");
   if (version !== "1.0.1") throw new Error(`expected version 1.0.1, got ${version}`);
 
-  const caseCount = await readRaw(glClient, address, "get_case_count");
-  log(`get_case_count     = ${caseCount}`);
-
-  if (Number(caseCount) === 0) {
-    log("\nno cases on chain yet; view methods needing a case id were not exercised");
+  // Counts arrive as strings under the default jsonSafeReturn; normalize before
+  // any arithmetic so "0" is a real zero and not a truthy string.
+  const toCount = (v) => {
+    if (v === null || v === undefined) return NaN;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : NaN;
+  };
+  const caseCount = toCount(await record("get_case_count"));
+  if (!Number.isFinite(caseCount) || caseCount === 0) {
+    log("\nno cases on chain; case-scoped reads cannot run until an analyze finalizes");
     return;
   }
   const first = 0;
-  const record = (k, v) => log(`${k.padEnd(21)}= ${JSON.stringify(v)}`);
-
-  record("get_case", await readRaw(glClient, address, "get_case", [first]));
-  const caseData = await readRaw(glClient, address, "get_case", [first]);
-  const sources = await readRaw(glClient, address, "get_sources", [first]);
-  record("get_sources", sources);
-  for (let i = 0; i < (caseData.source_count ?? sources.length); i++) {
-    record(`get_source[${i}]`, await readRaw(glClient, address, "get_source", [first, i]));
-  }
-  record("get_relation", await readRaw(glClient, address, "get_relation", [first, 0, 1]));
-  record("get_root_count", await readRaw(glClient, address, "get_root_count", [first]));
-  record("get_root_group", await readRaw(glClient, address, "get_root_group", [first, 0]));
-  record(
-    "get_dependency_matrix",
-    await readRaw(glClient, address, "get_dependency_matrix", [first])
-  );
-  record("get_diversity_bps", await readRaw(glClient, address, "get_diversity_bps", [first]));
-  record("get_redundancy_bps", await readRaw(glClient, address, "get_redundancy_bps", [first]));
-  record(
-    "get_classification",
-    await readRaw(glClient, address, "get_classification", [first])
-  );
+  const caseData = await record("get_case", first);
+  const sources = await record("get_sources", first);
+  const n = toCount(caseData?.source_count ?? (Array.isArray(sources) ? sources.length : 0));
+  for (let i = 0; i < n; i++) await record("get_source", first, i);
+  await record("get_relation", first, 0, 1);
+  await record("get_root_count", first);
+  await record("get_root_group", first, 0);
+  await record("get_dependency_matrix", first);
+  await record("get_diversity_bps", first);
+  await record("get_redundancy_bps", first);
+  await record("get_classification", first);
 }
 
 const cmd = process.argv[2];
