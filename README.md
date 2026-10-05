@@ -156,7 +156,22 @@ Source SHA-256: `b1d3dc2f1bb1a7c2f7622aa26f1fffddb3fa091c656e15880731a11ebea952d
 
 ## Verified lifecycle
 
-V1 was deployed successfully on Studionet. The deployment finalized with execution SUCCESS, and all frozen read methods were exercised against the deployed contract. Two real `analyze` transactions then ran with validators, not leader-only mode; the explorer records all three transactions (deploy plus both analyses) as FINALIZED.
+V1.0.1 was deployed on Studionet and the deployment finalized. One real
+`analyze` transaction then ran with validators, not leader-only mode; both
+transactions are recorded as FINALIZED by the explorer.
+
+Claim analyzed: `NASA launched the Perseverance rover on 30 July 2020`, from
+`https://science.nasa.gov/mission/mars-2020-perseverance/` and
+`https://en.wikipedia.org/wiki/Mars_2020`. The result was `SINGLE_ORIGIN` with
+`diversity_bps = 5000` and `redundancy_bps = 5000`: Wikipedia cites NASA, so the
+two pages are one evidentiary root.
+
+Every persisted source identity on that case was verified against the submitted
+inputs. Source 0 stored `https://science.nasa.gov/mission/mars-2020-perseverance`
+with domain `science.nasa.gov`; source 1 stored
+`https://en.wikipedia.org/wiki/Mars_2020` with domain `en.wikipedia.org`. Both
+match the normalized caller input exactly, with the trailing slash removed by
+normalization.
 
 ## Tests
 
