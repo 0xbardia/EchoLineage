@@ -212,14 +212,18 @@ async function cmdDeploy() {
   return contractAddress;
 }
 
-async function readRaw(glClient, abi, address, method, args = []) {
-  // jsonSafeReturn stays at its default (true): with it false, a u256 column
-  // comes back as BigInt and the SDK's own encoder throws
-  // "Do not know how to serialize a BigInt". The default returns counts as
-  // strings, which toNum normalizes.
+/**
+ * Run a deployed read method.
+ *
+ * The SDK's readContract builds calldata from functionName/args and issues a
+ * gen_call; this SDK has neither an abi parameter nor createContract.
+ * jsonSafeReturn stays at its default (true): with it false a u256 column comes
+ * back as BigInt and the SDK's own encoder throws "Do not know how to
+ * serialize a BigInt". The default returns counts as strings.
+ */
+async function readRaw(glClient, address, method, args = []) {
   return glClient.readContract({
     address,
-    abi,
     functionName: method,
     args,
   });
@@ -237,14 +241,16 @@ async function cmdCertify(target) {
     log(`schema: preloaded from ${process.env.EL_SCHEMA_FILE}`);
   }
   const schema = preloaded ?? (await glClient.getContractSchema(address));
-  const abi = schema.abi;
-  const methodCount = Object.keys(schema?.methods ?? {}).length;
-  log(`schema methods: ${methodCount}`);
-  if (methodCount !== 13) throw new Error(`expected 13 methods, schema reports ${methodCount}`);
+  const deployedMethods = Object.keys(schema?.methods ?? {});
+  log(`schema methods: ${deployedMethods.length}`);
+  if (deployedMethods.length !== 13) {
+    throw new Error(`expected 13 methods, schema reports ${deployedMethods.length}`);
+  }
+  log(`methods: ${deployedMethods.sort().join(" ")}\n`);
 
   const record = async (method, ...args) => {
     try {
-      const v = await readRaw(glClient, abi, address, method, args);
+      const v = await readRaw(glClient, address, method, args);
       log(`${method.padEnd(22)}= ${JSON.stringify(v)}`);
       return v;
     } catch (e) {

@@ -85,30 +85,22 @@ function statusName(tx) {
 /**
  * Run a deployed read method.
  *
- * The SDK exposes no createContract; reads go through readContract with the
- * abi from the schema. jsonSafeReturn stays at its default (true): with
- * jsonSafeReturn:false a u256 column comes back as BigInt and the SDK's own
- * encoder then throws "Do not know how to serialize a BigInt". The default
- * returns counts as strings, which toNum normalizes.
+ * The SDK's readContract builds calldata itself from `functionName`/`args` and
+ * issues a gen_call; there is no abi parameter and no createContract in this
+ * SDK. jsonSafeReturn stays at its default (true): with it false a u256 column
+ * comes back as BigInt and the SDK's own encoder then throws "Do not know how
+ * to serialize a BigInt". The default returns counts as strings.
  */
-async function readMethod(contract, abi, functionName, args = []) {
+async function readMethod(contract, functionName, args = []) {
   const v = await contract.readContract({
     address: contractAddress,
-    abi,
     functionName,
     args,
   });
   return typeof v === "bigint" ? Number(v) : v;
 }
 
-/**
- * Fetch the deployed schema and return it.
- *
- * Accepts a pre-fetched schema so a caller that already paid for the fetch
- * (the quota watcher) does not pay twice: on the shared Studio endpoint the
- * quota window can close between the two calls, which turns a write that could
- * have landed into a rate-limit error.
- */
+/** The deployed schema, or a pre-fetched copy handed in by the quota watcher. */
 async function loadSchema(address, preloaded) {
   return preloaded ?? (await glClient.getContractSchema(address));
 }
@@ -183,22 +175,29 @@ if (process.env.EL_SCHEMA_FILE) {
   preloaded = JSON.parse(fs.readFileSync(process.env.EL_SCHEMA_FILE, "utf8"));
   log(`schema   : preloaded from ${process.env.EL_SCHEMA_FILE}`);
 }
-const abi = (await loadSchema(contractAddress, preloaded)).abi;
-if (!abi) throw new Error("schema contained no abi");
+// The schema is only needed to prove the deployed methods exist; readContract
+// and writeContract encode calldata from functionName/args themselves and take
+// no abi. Reusing a pre-fetched schema (EL_SCHEMA_FILE) avoids paying for a
+// second gen_getContractSchema inside a closing quota window.
+const schema = await loadSchema(contractAddress, preloaded);
+const deployedMethods = Object.keys(schema?.methods ?? {});
+log(`schema methods: ${deployedMethods.length}`);
+if (!deployedMethods.includes("analyze")) {
+  throw new Error("analyze not present in the deployed schema");
+}
 
 // A read must never be the reason a write is abandoned: if case_count cannot be
 // read, proceed to the write and derive the case id from the finalized receipt.
 let before = null;
 try {
-  before = Number(await readMethod(glClient, abi, "get_case_count"));
+  before = Number(await readMethod(glClient, "get_case_count"));
   log(`case_count_before = ${before}`);
 } catch (e) {
-  log(`case_count_before unavailable (${e.message.slice(0, 80)}); proceeding to write`);
+  log(`case_count_before unavailable (${String(e.message).slice(0, 80)}); proceeding to write`);
 }
 
 const res = await glClient.writeContract({
   address: contractAddress,
-  abi,
   functionName: "analyze",
   args: [claim, urlsJson],
   value: 0n,
@@ -215,11 +214,11 @@ if (status !== "FINALIZED") {
 
 let caseId = before === null ? 0 : null;
 try {
-  const after = Number(await readMethod(glClient, abi, "get_case_count"));
+  const after = Number(await readMethod(glClient, "get_case_count"));
   log(`case_count_after = ${after}`);
   if (before !== null) caseId = after - 1;
 } catch (e) {
-  log(`case_count_after unavailable (${e.message.slice(0, 80)})`);
+  log(`case_count_after unavailable (${String(e.message).slice(0, 80)})`);
 }
 log(`CASE_ID=${caseId}`);
 
@@ -232,8 +231,8 @@ for (const name of [
   "get_root_count",
 ]) {
   try {
-    log(`${name} = ${JSON.stringify(await readMethod(glClient, abi, name, [caseId]))}`);
+    log(`${name} = ${JSON.stringify(await readMethod(glClient, name, [caseId]))}`);
   } catch (e) {
-    log(`${name} = ERROR ${e.message.slice(0, 120)}`);
+    log(`${name} = ERROR ${String(e.message).slice(0, 120)}`);
   }
 }
